@@ -13,7 +13,7 @@ Kero 是 AI 编程桌面工作台，连接 Codex、Claude Code 与你的本地�
 | Windows · x64 | `kero-<版本>-Setup.exe` |
 | Linux · x64（Debian / Ubuntu） | `kero-<版本>-amd64.deb` |
 
-请从具体版本的 **Assets** 下载对应安装包。GitHub 自动生成的 Source code 归档只是本发布仓库的文件，不能作为客户端安装。
+请从具体版本的 **Assets** 下载对应安装包。`kero-<版本>-win32-x64-hotfix.zip` 供客户端应用内更新使用，不用于首次安装。GitHub 自动生成的 Source code 归档只是本发布仓库的文件，不能作为客户端安装。
 
 macOS：解压后将 Kero 拖入「应用程序」。当前安装包采用 ad-hoc 签名，尚未经过 Apple 公证；首次启动可能被系统拦截，请核对下载来源后按系统提示处理。Windows 安装包目前未签名，系统可能显示发布者提示。
 

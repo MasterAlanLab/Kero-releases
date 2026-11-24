@@ -6,10 +6,15 @@ import { pathToFileURL } from 'node:url';
 import { releaseVersion, prepareReleaseDetails } from './release-details.mjs';
 
 const repository = 'MasterAlanLab/Kero-releases';
+// `from` is the packaging suffix, `to` the public one. The Windows hotfix ZIP is
+// the installed directory that the in-app updater copies over an installation;
+// macOS and Linux updates reuse their installers.
 const platforms = {
-  windows: [{ key: 'win32-x64', suffix: 'Setup.exe' }],
-  macos: [{ key: 'darwin-arm64', suffix: 'arm64.zip' }, { key: 'darwin-x64', suffix: 'x64.zip' }],
-  linux: [{ key: 'linux-x64', suffix: 'amd64.deb' }],
+  windows: [{ key: 'win32-x64', files: [{ role: 'installer', from: 'Setup.exe', to: 'Setup.exe' },
+    { role: 'hotfix', from: 'hotfix.zip', to: 'win32-x64-hotfix.zip' }] }],
+  macos: [{ key: 'darwin-arm64', files: [{ role: 'installer', from: 'arm64.zip', to: 'arm64.zip' }] },
+    { key: 'darwin-x64', files: [{ role: 'installer', from: 'x64.zip', to: 'x64.zip' }] }],
+  linux: [{ key: 'linux-x64', files: [{ role: 'installer', from: 'amd64.deb', to: 'amd64.deb' }] }],
 };
 
 function check(ok, message) {
@@ -47,15 +52,15 @@ function cleanOutput(dir) {
   check(readdirSync(dir).length === 0, `Output must be empty: ${dir}`);
 }
 
-// Only fixed, explicitly supported installer names are copied. Build-info may
-// also list hotfix files and internal metadata; these never enter public assets.
+// Only fixed, explicitly supported artifact names are copied. Build-info may
+// also list other hotfix files and internal metadata; these never enter public assets.
 export function stageInstallers(root, out, { version, sha, platform }) {
   validateVersion(version);
   validateCommit(sha);
   check(Object.hasOwn(platforms, platform), 'Unsupported platform');
   cleanOutput(out);
   const assets = [];
-  for (const { key, suffix } of platforms[platform]) {
+  for (const { key, files } of platforms[platform]) {
     const dir = path.join(root, version, key);
     const info = json(path.join(dir, 'build-info.json'));
     const [os, arch] = key.split('-');
@@ -63,16 +68,18 @@ export function stageInstallers(root, out, { version, sha, platform }) {
       && info.region === 'global' && info.commitSha === sha && info.platform === os
       && info.arch === arch && info.platformKey === key, `Build identity mismatch: ${key}`);
     check(Array.isArray(info.files), `Missing artifact list: ${key}`);
-    const installers = info.files.filter(file => file.role === 'installer');
-    check(installers.length === 1, `Expected one installer for ${key}`);
-    const entry = installers[0];
-    check([`cindy-${version}-${suffix}`, `kero-${version}-${suffix}`].includes(entry.name),
-      `Unexpected installer filename: ${key}`);
-    const source = path.join(dir, entry.name);
-    verifyFile(source, entry);
-    const name = `kero-${version}-${suffix}`;
-    copyFileSync(source, path.join(out, name));
-    assets.push({ name, platformKey: key, size: entry.size, sha256: entry.sha256 });
+    for (const { role, from, to } of files) {
+      const entries = info.files.filter(file => file.role === role);
+      check(entries.length === 1, `Expected one ${role} for ${key}`);
+      const entry = entries[0];
+      check([`cindy-${version}-${from}`, `kero-${version}-${from}`].includes(entry.name),
+        `Unexpected ${role} filename: ${key}`);
+      const source = path.join(dir, entry.name);
+      verifyFile(source, entry);
+      const name = `kero-${version}-${to}`;
+      copyFileSync(source, path.join(out, name));
+      assets.push({ name, platformKey: key, size: entry.size, sha256: entry.sha256 });
+    }
   }
   writeFileSync(path.join(out, `${platform}.json`), JSON.stringify({ version, sha, assets }, null, 2) + '\n');
   return assets;
@@ -88,10 +95,10 @@ export function assembleRelease(staged, out, { version, sha, notes, buildURL }) 
   for (const [platform, expected] of Object.entries(platforms)) {
     allowed.push(`${platform}.json`);
     const info = json(path.join(staged, `${platform}.json`));
+    const expectedNames = expected.flatMap(({ key, files }) => files.map(({ to }) => ({ key, name: `kero-${version}-${to}` })));
     check(info.version === version && info.sha === sha && Array.isArray(info.assets)
-      && info.assets.length === expected.length, `Staged build identity mismatch: ${platform}`);
-    for (const { key, suffix } of expected) {
-      const name = `kero-${version}-${suffix}`;
+      && info.assets.length === expectedNames.length, `Staged build identity mismatch: ${platform}`);
+    for (const { key, name } of expectedNames) {
       const matches = info.assets.filter(asset => asset.name === name && asset.platformKey === key);
       check(matches.length === 1, `Missing installer: ${name}`);
       verifyFile(path.join(staged, name), matches[0]);

@@ -64,16 +64,17 @@
 
 - 将 `source_ref` 解析为一次确定的源码提交，所有平台都构建该 SHA。
 - 使用源码仓库固定的 pnpm 版本与锁文件，设置 `KERO_PLATFORM_POOL=1` 固化 Kero 构建身份，调用既有 `pnpm release:package -- --region global --version <版本> --no-sign`。
-- 在 Windows x64、macOS Intel（连打 arm64 / x64）、Linux x64 原生 runner 上打包。Windows 和 Mac x64 执行打包脚本的 smoke 检查；Mac arm64 在 Intel runner 上校验架构与签名，不启动跨架构应用；Linux 无头 runner 跳过 smoke。
+- 在 Windows x64、macOS Intel（连打 arm64 / x64）、Linux x64 原生 runner 上打包。Windows 打包从源码构建应用内更新器 `cindy-updater`，runner 镜像需自带 cargo（工作流先检查）。Windows 和 Mac x64 执行打包脚本的 smoke 检查；Mac arm64 在 Intel runner 上校验架构与签名，不启动跨架构应用；Linux 无头 runner 跳过 smoke。
 - Linux runner 同时安装 Wayland scanner 及 `wayland-client`、`xkbcommon`、`json-c`、`libturbojpeg`、`libpng` 开发包，用于构建现有桌面输入与截图助手；不跳过原生助手编译。
-- 读取每个平台的 `build-info.json`，核对版本、源码提交、平台、架构、文件名、大小和 SHA-256，仅收集 `installer` 产物。发布时将文件名前缀 `cindy-` 改为 `kero-`，不改安装包内部内容及上游协议身份。
-- 所有平台完成并再次校验后，上传四个安装包、`SHA256SUMS` 和 `release-metadata.json`。元数据只记录版本、源码 SHA、构建链接与附件校验信息。
-- 不上传 hotfix 包、完整 build-info、用户配置或源码快照；不写 CDN，不生成自动更新 feed，不改变客户端更新器。
+- 读取每个平台的 `build-info.json`，核对版本、源码提交、平台、架构、文件名、大小和 SHA-256，收集 `installer` 产物与 Windows 的 `hotfix` 产物（安装目录 ZIP，供应用内更新）。发布时将文件名前缀 `cindy-` 改为 `kero-`，Windows 更新包命名为 `kero-<版本>-win32-x64-hotfix.zip`，不改安装包内部内容及上游协议身份。
+- 所有平台完成并再次校验后，上传四个安装包、Windows 更新包、`SHA256SUMS` 和 `release-metadata.json`。元数据只记录版本、源码 SHA、构建链接与附件校验信息。
+- 不上传其他 hotfix 包、完整 build-info、用户配置或源码快照；不写 CDN，不另生成更新清单：客户端从官网接口取得版本与 GitHub 计算的附件 SHA-256。
 
 默认产物：
 
 ```text
 kero-1.0.0-Setup.exe
+kero-1.0.0-win32-x64-hotfix.zip
 kero-1.0.0-arm64.zip
 kero-1.0.0-x64.zip
 kero-1.0.0-amd64.deb
@@ -81,7 +82,7 @@ SHA256SUMS
 release-metadata.json
 ```
 
-当前 macOS 包为 ad-hoc 签名的 ZIP，未经 Apple 公证；Windows 未签名。这里不承诺尚未接入的 DMG、公证、Windows 签名、Linux arm64 或客户端自动更新。
+当前 macOS 包为 ad-hoc 签名的 ZIP，未经 Apple 公证；Windows 未签名。这里不承诺尚未接入的 DMG、公证、Windows 签名或 Linux arm64。
 
 ## 失败与重试
 
@@ -97,7 +98,7 @@ release-metadata.json
 
 ## 官网下载联动
 
-Kero 服务端的 `GET /api/public/releases/latest` 读取本仓库最新公开正式 Release，缓存 5 分钟。官网的下载页只展示已上传完成且属于本仓库的受支持安装包。
+Kero 服务端的 `GET /api/public/releases/latest` 读取本仓库最新公开正式 Release，缓存 5 分钟。官网的下载页只展示已上传完成且属于本仓库的受支持安装包；同一响应的 `updates` 列出带 SHA-256 的应用内更新包（macOS ZIP、Linux `.deb`、Windows 更新包），客户端据此自动更新。正式版公开即会推送给已安装的客户端，预发布和草稿不会。
 
 源码侧仓库地址与附件链接白名单需同步使用 `MasterAlanLab/Kero-releases`；服务端重新部署后生效。草稿、预发布或还没有公开版本时，官网不会提供这些附件的正式版下载入口。
 

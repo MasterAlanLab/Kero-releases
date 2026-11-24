@@ -1,9 +1,10 @@
 // Production entry: stageInstallers / assembleRelease, the same functions used
 // by Actions. Protects the release contract: complete installers from one
-// version/commit only; no hotfix/internal metadata in public assets. No existing
-// tests existed in this new repo. Minimal failures: a mismatched commit, changed
-// installer bytes, a missing platform or an extra hotfix file. Tier: unit with
-// tiny synthetic files in isolated OS temp directories; no network/processes.
+// version/commit only; the Windows update ZIP is the only public hotfix and no
+// internal metadata is published. No existing tests existed in this new repo.
+// Minimal failures: a mismatched commit, changed installer bytes, a missing
+// platform or Windows update ZIP, or an extra hotfix file. Tier: unit with tiny
+// synthetic files in isolated OS temp directories; no network/processes.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
@@ -27,16 +28,17 @@ function fixture(t) {
     ['darwin-x64', 'x64.zip'], ['linux-x64', 'amd64.deb']]) {
     const dir = path.join(artifacts, version, key);
     mkdirSync(dir, { recursive: true });
-    const name = `cindy-${version}-${suffix}`;
-    const data = Buffer.from(`synthetic installer ${key}`);
-    writeFileSync(path.join(dir, name), data);
+    const artifact = (role, name) => {
+      const data = Buffer.from(`synthetic ${role} ${key}`);
+      writeFileSync(path.join(dir, name), data);
+      return { role, name, size: data.length, sha256: createHash('sha256').update(data).digest('hex') };
+    };
     const [platform, arch] = key.split('-');
     writeFileSync(path.join(dir, 'build-info.json'), JSON.stringify({
       schemaVersion: 2, version, versionless: false, commitSha: sha, region: 'global',
       platform, arch, platformKey: key, privateBuildNote: 'must not be copied',
-      files: [{ role: 'installer', name, size: data.length,
-        sha256: createHash('sha256').update(data).digest('hex') },
-      { role: 'hotfix', name: 'internal-hotfix.zip' }],
+      files: [artifact('installer', `cindy-${version}-${suffix}`), platform === 'win32'
+        ? artifact('hotfix', `cindy-${version}-hotfix.zip`) : { role: 'hotfix', name: 'internal-hotfix.zip' }],
     }));
   }
   const stage = (platform) => {
@@ -96,14 +98,15 @@ test('preflight skips duplicate published versions while drafts and new versions
   await assert.rejects(planRelease(version, { ...opts, request: async () => new Response('', { status: 403 }) }), /HTTP 403/);
 });
 
-test('assembles four renamed installers and reproducible checksums; excludes internal build data', t => {
+test('assembles renamed installers, the Windows update ZIP and reproducible checksums; excludes internal build data', t => {
   const f = fixture(t);
   for (const platform of ['windows', 'macos', 'linux']) f.stage(platform);
   const assets = assembleRelease(f.staged, f.out, options);
-  assert.equal(assets.length, 4);
-  assert.deepEqual(readdirSync(f.out).sort(), ['SHA256SUMS', 'kero-1.2.3-Setup.exe',
+  assert.equal(assets.length, 5);
+  assert.deepEqual(readdirSync(f.out).sort(), ['SHA256SUMS', 'kero-1.2.3-Setup.exe', 'kero-1.2.3-win32-x64-hotfix.zip',
     'kero-1.2.3-amd64.deb', 'kero-1.2.3-arm64.zip', 'kero-1.2.3-x64.zip', 'release-metadata.json'].sort());
   assert.equal(readFileSync(path.join(f.out, 'kero-1.2.3-arm64.zip'), 'utf8'), 'synthetic installer darwin-arm64');
+  assert.equal(readFileSync(path.join(f.out, 'kero-1.2.3-win32-x64-hotfix.zip'), 'utf8'), 'synthetic hotfix win32-x64');
   assert.equal(readFileSync(path.join(f.out, 'SHA256SUMS'), 'utf8'),
     assets.map(a => `${createHash('sha256').update(readFileSync(path.join(f.out, a.name))).digest('hex')}  ${a.name}\n`).join(''));
   const metadata = JSON.parse(readFileSync(path.join(f.out, 'release-metadata.json')));
@@ -135,8 +138,14 @@ test('rejects tampered bytes at staging and again before release publication', t
   assert.throws(() => assembleRelease(f.staged, f.out, options), /checksum mismatch/);
 });
 
-test('rejects a missing platform or unexpected staged hotfix rather than publishing a partial release', t => {
+test('rejects a missing platform, Windows update ZIP or unexpected staged hotfix rather than publishing a partial release', t => {
   const f = fixture(t);
+  const manifest = path.join(f.artifacts, version, 'win32-x64', 'build-info.json');
+  const original = JSON.parse(readFileSync(manifest));
+  writeFileSync(manifest, JSON.stringify({ ...original, files: original.files.filter(file => file.role !== 'hotfix') }));
+  assert.throws(() => stageInstallers(f.artifacts, path.join(f.root, 'no-hotfix'),
+    { ...options, platform: 'windows' }), /Expected one hotfix/);
+  writeFileSync(manifest, JSON.stringify(original));
   f.stage('windows');
   assert.throws(() => assembleRelease(f.staged, f.out, options), /ENOENT/);
   f.stage('macos');

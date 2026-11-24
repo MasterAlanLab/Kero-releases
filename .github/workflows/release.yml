@@ -170,6 +170,12 @@ jobs:
           libwayland-bin libwayland-dev libxkbcommon-dev libjson-c-dev
           libturbojpeg0-dev libpng-dev
 
+      # Windows packaging builds the in-app updater (cindy-updater, Rust + Tauri)
+      # from source and fails without cargo; check the runner image early.
+      - name: Check Rust toolchain for the Windows updater
+        if: runner.os == 'Windows'
+        run: cargo --version && rustc --version
+
       - name: Install dependencies
         working-directory: source
         run: pnpm install --frozen-lockfile
